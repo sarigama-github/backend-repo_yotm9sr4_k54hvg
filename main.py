@@ -89,8 +89,11 @@ def list_photos(place: Optional[str] = None, year: Optional[int] = None, person:
         filter_dict = {}
         if place:
             filter_dict["place"] = place
-        if year is not None:
-            filter_dict["year"] = year
+        if year is not None and str(year) != "":
+            try:
+                filter_dict["year"] = int(year)
+            except Exception:
+                pass
         if person:
             filter_dict["people"] = {"$in": [person]}
         docs = get_documents("photo", filter_dict, limit)
@@ -166,6 +169,71 @@ def get_filters():
         # people from people collection
         ppl = [d.get("name") for d in db["person"].find({}, {"name": 1})]
         return {"places": sorted(places), "years": sorted(years), "people": sorted(ppl)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Seed mock data for gallery demo
+@app.post("/api/mock/seed")
+def seed_mock():
+    try:
+        if db is None:
+            raise Exception("Database not configured")
+        photos = [
+            {
+                "url": "https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?w=800",
+                "filename": "friends-park.jpg",
+                "place": "Central Park",
+                "year": 2019,
+                "people": ["Alice", "Bob"],
+            },
+            {
+                "url": "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=800",
+                "filename": "portrait-alice.jpg",
+                "place": "Studio",
+                "year": 2020,
+                "people": ["Alice"],
+            },
+            {
+                "url": "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=800",
+                "filename": "dog-walk.jpg",
+                "place": "Brooklyn",
+                "year": 2018,
+                "people": ["Bob"],
+            },
+            {
+                "url": "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=800",
+                "filename": "city-trip.jpg",
+                "place": "Tokyo",
+                "year": 2023,
+                "people": ["Charlie", "Dana"],
+            },
+            {
+                "url": "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=800",
+                "filename": "mountain-hike.jpg",
+                "place": "Alps",
+                "year": 2021,
+                "people": ["Alice", "Charlie"],
+            },
+        ]
+        # Upsert photos (avoid duplicates by URL)
+        inserted = 0
+        for p in photos:
+            existing = db["photo"].find_one({"url": p["url"]})
+            if existing:
+                continue
+            p["created_at"] = datetime.utcnow()
+            db["photo"].insert_one(p)
+            inserted += 1
+        # Recompute people counts
+        # gather counts from photos collection
+        counts = {}
+        for doc in db["photo"].find({}, {"people": 1}):
+            for name in doc.get("people", []):
+                counts[name] = counts.get(name, 0) + 1
+        for name, cnt in counts.items():
+            db["person"].update_one({"name": name}, {"$set": {"photo_count": cnt}}, upsert=True)
+        return {"inserted": inserted, "people": counts}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
